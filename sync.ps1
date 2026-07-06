@@ -48,7 +48,7 @@ $proxyPath = Join-Path $PSScriptRoot "temp_proxy.js"
 Set-Content -Path $proxyPath -Value $proxyCode
 
 Write-Host "Starting DNS Helper Proxy..." -ForegroundColor Cyan
-$proxyProcess = Start-Process node -ArgumentList $proxyPath -NoNewWindow -PassThru
+$proxyProcess = Start-Process node -ArgumentList "`"$proxyPath`"" -NoNewWindow -PassThru
 
 # Wait 1.5 seconds for proxy to initialize
 Start-Sleep -Milliseconds 1500
