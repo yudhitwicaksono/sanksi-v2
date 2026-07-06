@@ -25,3 +25,7 @@ user_guide_src/cilexer/pycilexer.egg-info/*
 *.stTheme.cache
 *.sublime-workspace
 *.sublime-project
+
+# Temporary DNS proxy helper
+temp_proxy.js
+
