@@ -29,3 +29,11 @@ user_guide_src/cilexer/pycilexer.egg-info/*
 # Temporary DNS proxy helper
 temp_proxy.js
 
+# Legacy backup
+.legacy_ci3/
+writable/cache/*
+writable/logs/*
+writable/session/*
+writable/debugbar/*
+
+
