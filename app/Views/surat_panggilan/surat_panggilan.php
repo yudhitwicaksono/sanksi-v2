@@ -200,7 +200,7 @@ if (empty($kelasLengkap)) $kelasLengkap = '-';
                     </a>
 
                     <!-- Back Button -->
-                    <a href="<?= site_url('main/data_wali_muridP') ?>" class="btn btn-outline-secondary btn-sm px-3">
+                    <a href="<?= site_url('main/surat_penggilan_orang_tua') ?>" class="btn btn-outline-secondary btn-sm px-3">
                         <i class="fa-solid fa-arrow-left me-1"></i> Kembali
                     </a>
                 </div>

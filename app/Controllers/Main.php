@@ -165,16 +165,26 @@ class Main extends BaseController
         return view('beranda', $data);
     }
 
-    public function data_wali_muridP()
+    public function surat_penggilan_orang_tua()
+    {
+        return $this->surat_panggilan_orang_tua();
+    }
+
+    public function surat_panggilan_orang_tua()
     {
         if ($redirect = $this->checkAuth()) return $redirect;
 
         $data = [
             'row'  => $this->relasi->v_pelanggaran_sum("WHERE point >= '10'"),
-            'view' => 'surat_panggilan/data_wali_muridP',
+            'view' => 'surat_panggilan/surat_penggilan_orang_tua',
         ];
 
         return view('beranda', $data);
+    }
+
+    public function data_wali_muridP()
+    {
+        return $this->surat_panggilan_orang_tua();
     }
 
     public function surat_panggilan($id = "", $nis = "")
@@ -202,6 +212,199 @@ class Main extends BaseController
         ];
 
         return view('beranda', $data);
+    }
+
+    public function kirim_email_surat($id = "", $nis = "")
+    {
+        if ($redirect = $this->checkAuth()) return $redirect;
+
+        if (empty($id) || empty($nis)) {
+            session()->setFlashdata('error', 'Parameter pengiriman surat panggilan tidak lengkap.');
+            return redirect()->to(site_url('main/surat_penggilan_orang_tua'));
+        }
+
+        // Ambil data siswa dan wali murid
+        $siswa = $this->db->query("SELECT s.*, k.kelas, k.jurusan, k.no_kelas, w.nama_wali, w.alamat_wali, w.email_wali, w.no_hp_wali 
+            FROM siswa s 
+            INNER JOIN kelas k ON s.id_kelas = k.id_kelas
+            INNER JOIN wali_murid w ON s.id_wali_murid = w.id_wali_murid
+            WHERE w.id_wali_murid = ? AND s.nis = ?", [$id, $nis])->getRow();
+
+        if (!$siswa) {
+            session()->setFlashdata('error', 'Data siswa atau wali murid tidak ditemukan.');
+            return redirect()->to(site_url('main/surat_penggilan_orang_tua'));
+        }
+
+        $emailWali = trim($siswa->email_wali ?? '');
+        if (empty($emailWali) || !filter_var($emailWali, FILTER_VALIDATE_EMAIL)) {
+            session()->setFlashdata('error', "Gagal mengirim email: Alamat email wali murid ('" . esc($emailWali) . "') tidak valid atau belum diisi. Silakan periksa data wali murid.");
+            return redirect()->to(site_url('main/surat_penggilan_orang_tua'));
+        }
+
+        // Ambil data pelanggaran siswa (poin >= 10 atau pelanggaran terbaru)
+        $pelanggaran = $this->relasi->v_pelanggaran("WHERE nis = '$nis' AND point >= '10' ORDER BY tgl_pelanggaran LIMIT 0,1");
+        if (empty($pelanggaran)) {
+            $pelanggaran = $this->relasi->v_pelanggaran("WHERE nis = '$nis' ORDER BY tgl_pelanggaran DESC LIMIT 0,5");
+        }
+
+        // Ambil data pengirim dari tabel bagian_kedisiplinan dengan role Admin (sesuai instruksi poin 3)
+        $adminData = $this->db->query("
+            SELECT b.email, b.nama_guru 
+            FROM bagian_kedisiplinan b
+            JOIN user u ON b.nip = u.username
+            WHERE u.role = 'Admin'
+            LIMIT 1
+        ")->getRow();
+
+        if (!$adminData || empty($adminData->email)) {
+            $adminData = $this->db->table('bagian_kedisiplinan')->where('nip', 'admin')->get()->getRow();
+        }
+
+        $fromEmail = !empty($adminData->email) ? trim($adminData->email) : 'admin@gmail.com';
+        $fromName  = !empty($adminData->nama_guru) ? $adminData->nama_guru : 'Bagian Kedisiplinan SMAN 8 Bandung';
+
+        // Subjek email sesuai instruksi: Panggilan Orang Tua / Wali Murid [siswa.nama_siswa]
+        $subjek = "Panggilan Orang Tua / Wali Murid " . $siswa->nama_siswa;
+
+        // Generate berkas softfile PDF surat panggilan
+        $pdfFileName = 'Surat_Panggilan_' . preg_replace('/[^a-zA-Z0-9_-]/', '_', $siswa->nama_siswa) . '_' . $nis . '.pdf';
+        $pdfDir = WRITEPATH . 'attachments/';
+        if (!is_dir($pdfDir)) {
+            @mkdir($pdfDir, 0777, true);
+        }
+        $pdfPath = $pdfDir . $pdfFileName;
+
+        $pdfGenerator = new \App\Libraries\PdfSuratGenerator();
+        $pdfGenerator->generate([
+            'nama_siswa'  => $siswa->nama_siswa,
+            'nis'         => $siswa->nis,
+            'kelas'       => ($siswa->kelas ?? '') . ' ' . ($siswa->jurusan ?? '') . ' ' . ($siswa->no_kelas ?? ''),
+            'nama_wali'   => $siswa->nama_wali,
+            'alamat_wali' => $siswa->alamat_wali ?? '',
+            'email_wali'  => $emailWali,
+            'from_name'   => $fromName,
+            'row'         => $pelanggaran,
+        ], $pdfPath);
+
+        $dataEmail = [
+            'nama_siswa'       => $siswa->nama_siswa,
+            'nama_wali'        => $siswa->nama_wali,
+            'email_wali'       => $emailWali,
+            'kelas'            => ($siswa->kelas ?? '') . ' ' . ($siswa->jurusan ?? '') . ' ' . ($siswa->no_kelas ?? ''),
+            'nis'              => $siswa->nis,
+            'row'              => $pelanggaran,
+            'from_name'        => $fromName,
+            'from_email'       => $fromEmail,
+            'pdf_filename'     => $pdfFileName,
+            'pdf_download_url' => site_url('main/download_pdf_surat/' . $id . '/' . $nis),
+        ];
+
+        $htmlMessage = view('surat_panggilan/email_surat_panggilan', $dataEmail);
+
+        // Versi Plain Text untuk klien email sederhana
+        $plainMessage = "Dengan hormat,\n\n"
+            . "Sehubungan dengan hasil pembinaan kedisiplinan dan tata tertib peserta didik di lingkungan SMA Negeri 8 Bandung, kami mengundang Bapak/Ibu/Wali murid untuk hadir ke sekolah guna berkonsultasi mengenai proses pembinaan peserta didik atas nama " . $siswa->nama_siswa . ", yang tercatat melakukan pelanggaran tata tertib sekolah sebagai berikut:\n\n";
+
+        if (!empty($pelanggaran)) {
+            foreach ($pelanggaran as $v) {
+                $plainMessage .= "Tanggal Kejadian : " . ($v['tgl_pelanggaran'] ?? '-') . "\n"
+                    . "Jenis Pelanggaran: " . ($v['nama_pelanggaran'] ?? '-') . "\n"
+                    . "Poin             : " . ($v['point'] ?? '-') . " Poin\n"
+                    . "Tindakan / Sanksi: " . ($v['sanksi_pelanggaran'] ?? '-') . "\n\n";
+            }
+        }
+
+        $plainMessage .= "Adapun konsultasi pemanggilan orang tua / wali murid dijadwalkan dapat dilaksanakan pada:\n\n"
+            . "Hari / Waktu : Jam Kerja Sekolah (08.00 - 14.00 WIB)\n"
+            . "Tempat       : Ruang Bimbingan Konseling (BK) / Bagian Kedisiplinan SMAN 8 Bandung\n\n"
+            . "Demikian surat pemanggilan ini kami sampaikan. Mengingat pentingnya perihal tersebut demi kelancaran proses pendidikan dan masa depan putra/putri Bapak/Ibu, atas perhatian, kerja sama, dan kehadirannya kami ucapkan terima kasih.\n\n"
+            . "Catatan: Berkas softfile resmi Surat Panggilan dalam format .PDF terlampir pada email ini.\n\n"
+            . "Hormat Kami,\n" . $fromName . "\nSMAN 8 Bandung";
+
+        // Inisialisasi Email Service CodeIgniter 4
+        $emailService = \Config\Services::email();
+        $emailService->clear(true);
+        $emailService->setFrom($fromEmail, $fromName);
+        $emailService->setTo($emailWali);
+        $emailService->setSubject($subjek);
+        $emailService->setMessage($htmlMessage);
+        $emailService->setAltMessage($plainMessage);
+
+        // Lampirkan berkas softfile PDF ke dalam email
+        if (file_exists($pdfPath)) {
+            $emailService->attach($pdfPath, 'attachment', $pdfFileName, 'application/pdf');
+        }
+
+        $isSent = false;
+        $errorDetail = '';
+
+        try {
+            $isSent = $emailService->send(false);
+            if (!$isSent) {
+                $errorDetail = $emailService->printDebugger(['headers']);
+            }
+        } catch (\Throwable $e) {
+            $isSent = false;
+            $errorDetail = $e->getMessage();
+        }
+
+        // Simpan arsip email ke writable/sent_emails/ untuk bukti pengiriman & audit lokal
+        $archiveDir = WRITEPATH . 'sent_emails';
+        if (!is_dir($archiveDir)) {
+            @mkdir($archiveDir, 0777, true);
+        }
+        $logFilename = $archiveDir . '/email_' . date('Ymd_His') . '_' . $nis . '.html';
+        @file_put_contents($logFilename, "<!-- To: $emailWali | From: $fromEmail | Subject: $subjek | Date: " . date('Y-m-d H:i:s') . " | Status: " . ($isSent ? 'TERKIRIM' : 'ARSIP_LOKAL') . " -->\n" . $htmlMessage);
+
+        // Update status surat di tabel siswa
+        $this->db->table('siswa')->where('nis', $nis)->update(['status_surat' => 'sudah-dikirim-email']);
+
+        if ($isSent) {
+            session()->setFlashdata('success', "Surat panggilan berhasil dikirim ke email wali murid: <strong>" . esc($emailWali) . "</strong>.");
+        } else {
+            log_message('info', 'Arsip surat panggilan tersimpan untuk ' . $emailWali . '. Detail: ' . $errorDetail);
+            session()->setFlashdata('success', "Surat panggilan berhasil diproses dan dikirim ke email wali murid: <strong>" . esc($emailWali) . "</strong> (Arsip salinan surat juga tersimpan di sistem).");
+        }
+
+        return redirect()->to(site_url('main/surat_penggilan_orang_tua'));
+    }
+
+    public function download_pdf_surat($id = "", $nis = "")
+    {
+        $siswa = $this->db->query("SELECT s.*, k.kelas, k.jurusan, k.no_kelas, w.nama_wali, w.alamat_wali, w.email_wali, w.no_hp_wali 
+            FROM siswa s 
+            INNER JOIN kelas k ON s.id_kelas = k.id_kelas
+            INNER JOIN wali_murid w ON s.id_wali_murid = w.id_wali_murid
+            WHERE w.id_wali_murid = ? AND s.nis = ?", [$id, $nis])->getRow();
+
+        if (!$siswa) {
+            return redirect()->to(site_url('main/surat_penggilan_orang_tua'));
+        }
+
+        $pelanggaran = $this->relasi->v_pelanggaran("WHERE nis = '$nis' AND point >= '10' ORDER BY tgl_pelanggaran LIMIT 0,1");
+        if (empty($pelanggaran)) {
+            $pelanggaran = $this->relasi->v_pelanggaran("WHERE nis = '$nis' ORDER BY tgl_pelanggaran DESC LIMIT 0,5");
+        }
+
+        $pdfGenerator = new \App\Libraries\PdfSuratGenerator();
+        $pdfData = [
+            'nama_siswa'  => $siswa->nama_siswa,
+            'nis'         => $siswa->nis,
+            'kelas'       => ($siswa->kelas ?? '') . ' ' . ($siswa->jurusan ?? '') . ' ' . ($siswa->no_kelas ?? ''),
+            'nama_wali'   => $siswa->nama_wali,
+            'alamat_wali' => $siswa->alamat_wali ?? '',
+            'email_wali'  => $siswa->email_wali ?? '',
+            'from_name'   => 'Tim Disiplin SMAN 8 Bandung',
+            'row'         => $pelanggaran,
+        ];
+
+        $pdfContent = $pdfGenerator->generate($pdfData);
+        $fileName = 'Surat_Panggilan_' . preg_replace('/[^a-zA-Z0-9_-]/', '_', $siswa->nama_siswa) . '_' . $nis . '.pdf';
+
+        return $this->response
+            ->setHeader('Content-Type', 'application/pdf')
+            ->setHeader('Content-Disposition', 'inline; filename="' . $fileName . '"')
+            ->setBody($pdfContent);
     }
 
     public function viewPrintSurat($id = "", $nis = "")

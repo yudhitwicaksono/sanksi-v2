@@ -82,7 +82,7 @@
                         <i class="nav-icon fa-solid fa-clock-rotate-left"></i>
                         <span>Riwayat Pelanggaran</span>
                     </a>
-                    <a href="<?= site_url('main/data_wali_muridP') ?>" class="nav-link <?= strpos(current_url(), 'data_wali_muridP') !== false ? 'active' : '' ?>">
+                    <a href="<?= site_url('main/surat_penggilan_orang_tua') ?>" class="nav-link <?= (strpos(current_url(), 'surat_penggilan_orang_tua') !== false || strpos(current_url(), 'surat_panggilan_orang_tua') !== false || strpos(current_url(), 'data_wali_muridP') !== false || strpos(current_url(), 'surat_panggilan') !== false) ? 'active' : '' ?>">
                         <i class="nav-icon fa-solid fa-envelope-open-text"></i>
                         <span>Surat Panggilan (≥10 Poin)</span>
                     </a>

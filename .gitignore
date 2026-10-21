@@ -35,5 +35,7 @@ writable/cache/*
 writable/logs/*
 writable/session/*
 writable/debugbar/*
+writable/attachments/*
+writable/sent_emails/*
 
 
